@@ -11,32 +11,40 @@ const int ENC_B = 3;
 // ========================
 // WHEEL + ENCODER CONFIG
 // ========================
-const float WHEEL_DIAMETER_M = 0.073025;   // 2 7/8 inches in meters
-const int MOTOR_TICKS_PER_REV = 360;
+const float WHEEL_DIAMETER_IN = 2.875;  // 2 7/8 inches
+
+// MEASURED encoder spec
+// 70 PPR measured on one channel
+// Full quadrature = 70 * 4 = 280 CPR
+const int MOTOR_TICKS_PER_REV = 280;
 
 // Pulley ratio: motor 16T → axle 20T
 const float GEAR_RATIO = 16.0 / 20.0;
 
+// Conversion factor
+const float INCH_TO_M = 0.0254;
+float wheelDiameterM;
+
 // ========================
 // DISTANCE + TIME
 // ========================
-const float TARGET_DISTANCE_M = 8.0;       // desired distance in meters
-const float SLOWDOWN_DISTANCE_M = 1.0;     // start inching ~1 m before target
-const float TARGET_TIME_S = 15.0;          // target time in seconds
+const float TARGET_DISTANCE_M = 8.0;
+const float SLOWDOWN_DISTANCE_M = 1.0;
+const float TARGET_TIME_S = 15.0;
 const unsigned long TARGET_TIME_MS = TARGET_TIME_S * 1000;
 
 // ========================
 // SPEED CONTROL
 // ========================
-const int MIN_START_PWM = 50;       // initial PWM
-const int MAX_CRUISE_PWM = 160;     // lowered cruise PWM
-const int INCH_PWM = 80;            // small PWM for inching
-const int INCH_DELAY_MS = 50;       // time per inching step
+const int MIN_START_PWM = 50;
+const int MAX_CRUISE_PWM = 160;
+const int INCH_PWM = 80;
+const int INCH_DELAY_MS = 50;
 
 // ========================
 // SAFETY
 // ========================
-const unsigned long MAX_RUN_TIME_MS = 20000; // hard safety limit
+const unsigned long MAX_RUN_TIME_MS = 20000;
 
 // ========================
 // GLOBALS
@@ -45,10 +53,10 @@ volatile long encoderCount = 0;
 float metersPerTick;
 
 // ========================
-// ENCODER ISR
+// ENCODER ISR (corrected)
 // ========================
 void encoderISR() {
-  if (digitalRead(ENC_A) == digitalRead(ENC_B)) {
+  if (digitalRead(ENC_B) == HIGH) {
     encoderCount++;
   } else {
     encoderCount--;
@@ -79,12 +87,19 @@ void setup() {
   pinMode(ENC_A, INPUT_PULLUP);
   pinMode(ENC_B, INPUT_PULLUP);
 
-  attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR, CHANGE);
+  // Interrupt now uses single edge, stable counting
+  attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR, RISING);
 
-  metersPerTick = (3.14159 * WHEEL_DIAMETER_M) / (MOTOR_TICKS_PER_REV / GEAR_RATIO);
+  wheelDiameterM = WHEEL_DIAMETER_IN * INCH_TO_M;
+
+  metersPerTick =
+    (3.14159 * wheelDiameterM) /
+    (MOTOR_TICKS_PER_REV / GEAR_RATIO);
 
   Serial.begin(9600);
   Serial.println("RUN READY - STARTING IMMEDIATELY");
+  Serial.print("Wheel diameter (m): ");
+  Serial.println(wheelDiameterM, 6);
   Serial.print("Meters per tick: ");
   Serial.println(metersPerTick, 6);
   Serial.print("Target time (ms): ");
@@ -106,10 +121,7 @@ void loop() {
   Serial.print("Target ticks: ");
   Serial.println(targetTicks);
 
-  // -------------------------
-  // ACCELERATION RAMP
-  // -------------------------
-  int accelTimeMs = 1500;      // ramp time to MAX_CRUISE_PWM
+  int accelTimeMs = 1500;
   int steps = 30;
   int delayPerStep = accelTimeMs / steps;
 
@@ -125,9 +137,6 @@ void loop() {
     long ticks = abs(encoderCount);
     float dist = ticks * metersPerTick;
 
-    // -------------------------
-    // CRUISE OR INCHING
-    // -------------------------
     if (!inchingPhase && ticks >= (targetTicks - slowTicks)) {
       inchingPhase = true;
       motorStop();
@@ -138,28 +147,23 @@ void loop() {
       long remainingTicks = targetTicks - ticks;
       if (remainingTicks <= 0) break;
 
-      // inch forward in small bursts
       motorForward(INCH_PWM);
       delay(INCH_DELAY_MS);
       motorStop();
-      delay(10); // short pause between inches
+      delay(10);
     } else {
-      // cruise at MAX_CRUISE_PWM
       motorForward(MAX_CRUISE_PWM);
     }
 
-    // -------------------------
-    // DEBUG PRINT
-    // -------------------------
     unsigned long elapsed = millis() - startTime;
-    unsigned long remainingTime = (TARGET_TIME_MS > elapsed) ? TARGET_TIME_MS - elapsed : 1;
+    unsigned long remainingTime =
+      (TARGET_TIME_MS > elapsed) ? TARGET_TIME_MS - elapsed : 1;
 
     Serial.print("Ticks: "); Serial.print(ticks);
     Serial.print("  Dist: "); Serial.print(dist, 3);
     Serial.print("  PWM: "); Serial.print(inchingPhase ? INCH_PWM : MAX_CRUISE_PWM);
     Serial.print("  Time left (ms): "); Serial.println(remainingTime);
 
-    // HARD SAFETY STOP
     if (millis() - startTime > MAX_RUN_TIME_MS) {
       Serial.println("TIMEOUT STOP");
       motorStop();
@@ -167,9 +171,6 @@ void loop() {
     }
   }
 
-  // -------------------------
-  // ACTIVE BRAKE
-  // -------------------------
   Serial.println("TARGET REACHED - BRAKING");
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, HIGH);
@@ -178,7 +179,5 @@ void loop() {
 
   Serial.println("RUN COMPLETE");
 
-  while (true) {
-    // halt program
-  }
+  while (true) {}
 }
