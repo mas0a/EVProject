@@ -1,0 +1,184 @@
+// ========================
+// PIN DEFINITIONS
+// ========================
+const int ENA = 11;
+const int IN1 = 10;
+const int IN2 = 9;
+
+const int ENC_A = 2;
+const int ENC_B = 3;
+
+// ========================
+// WHEEL + ENCODER CONFIG
+// ========================
+const float WHEEL_DIAMETER_M = 0.073025;   // 2 7/8 inches in meters
+const int MOTOR_TICKS_PER_REV = 360;
+
+// Pulley ratio: motor 16T → axle 20T
+const float GEAR_RATIO = 16.0 / 20.0;
+
+// ========================
+// DISTANCE + TIME
+// ========================
+const float TARGET_DISTANCE_M = 8.0;       // desired distance in meters
+const float SLOWDOWN_DISTANCE_M = 1.0;     // start inching ~1 m before target
+const float TARGET_TIME_S = 15.0;          // target time in seconds
+const unsigned long TARGET_TIME_MS = TARGET_TIME_S * 1000;
+
+// ========================
+// SPEED CONTROL
+// ========================
+const int MIN_START_PWM = 50;       // initial PWM
+const int MAX_CRUISE_PWM = 160;     // lowered cruise PWM
+const int INCH_PWM = 80;            // small PWM for inching
+const int INCH_DELAY_MS = 50;       // time per inching step
+
+// ========================
+// SAFETY
+// ========================
+const unsigned long MAX_RUN_TIME_MS = 20000; // hard safety limit
+
+// ========================
+// GLOBALS
+// ========================
+volatile long encoderCount = 0;
+float metersPerTick;
+
+// ========================
+// ENCODER ISR
+// ========================
+void encoderISR() {
+  if (digitalRead(ENC_A) == digitalRead(ENC_B)) {
+    encoderCount++;
+  } else {
+    encoderCount--;
+  }
+}
+
+// ========================
+// MOTOR CONTROL
+// ========================
+void motorForward(int pwm) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, pwm);
+}
+
+void motorStop() {
+  analogWrite(ENA, 0);
+}
+
+// ========================
+// SETUP
+// ========================
+void setup() {
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(ENC_A, INPUT_PULLUP);
+  pinMode(ENC_B, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR, CHANGE);
+
+  metersPerTick = (3.14159 * WHEEL_DIAMETER_M) / (MOTOR_TICKS_PER_REV / GEAR_RATIO);
+
+  Serial.begin(9600);
+  Serial.println("RUN READY - STARTING IMMEDIATELY");
+  Serial.print("Meters per tick: ");
+  Serial.println(metersPerTick, 6);
+  Serial.print("Target time (ms): ");
+  Serial.println(TARGET_TIME_MS);
+}
+
+// ========================
+// LOOP
+// ========================
+void loop() {
+  encoderCount = 0;
+  unsigned long startTime = millis();
+
+  long targetTicks = TARGET_DISTANCE_M / metersPerTick;
+  long slowTicks   = SLOWDOWN_DISTANCE_M / metersPerTick;
+
+  Serial.print("Target distance (m): ");
+  Serial.println(TARGET_DISTANCE_M, 3);
+  Serial.print("Target ticks: ");
+  Serial.println(targetTicks);
+
+  // -------------------------
+  // ACCELERATION RAMP
+  // -------------------------
+  int accelTimeMs = 1500;      // ramp time to MAX_CRUISE_PWM
+  int steps = 30;
+  int delayPerStep = accelTimeMs / steps;
+
+  for (int i = 1; i <= steps; i++) {
+    int pwm = map(i, 1, steps, MIN_START_PWM, MAX_CRUISE_PWM);
+    motorForward(pwm);
+    delay(delayPerStep);
+  }
+
+  bool inchingPhase = false;
+
+  while (true) {
+    long ticks = abs(encoderCount);
+    float dist = ticks * metersPerTick;
+
+    // -------------------------
+    // CRUISE OR INCHING
+    // -------------------------
+    if (!inchingPhase && ticks >= (targetTicks - slowTicks)) {
+      inchingPhase = true;
+      motorStop();
+      Serial.println("INCHING PHASE START");
+    }
+
+    if (inchingPhase) {
+      long remainingTicks = targetTicks - ticks;
+      if (remainingTicks <= 0) break;
+
+      // inch forward in small bursts
+      motorForward(INCH_PWM);
+      delay(INCH_DELAY_MS);
+      motorStop();
+      delay(10); // short pause between inches
+    } else {
+      // cruise at MAX_CRUISE_PWM
+      motorForward(MAX_CRUISE_PWM);
+    }
+
+    // -------------------------
+    // DEBUG PRINT
+    // -------------------------
+    unsigned long elapsed = millis() - startTime;
+    unsigned long remainingTime = (TARGET_TIME_MS > elapsed) ? TARGET_TIME_MS - elapsed : 1;
+
+    Serial.print("Ticks: "); Serial.print(ticks);
+    Serial.print("  Dist: "); Serial.print(dist, 3);
+    Serial.print("  PWM: "); Serial.print(inchingPhase ? INCH_PWM : MAX_CRUISE_PWM);
+    Serial.print("  Time left (ms): "); Serial.println(remainingTime);
+
+    // HARD SAFETY STOP
+    if (millis() - startTime > MAX_RUN_TIME_MS) {
+      Serial.println("TIMEOUT STOP");
+      motorStop();
+      break;
+    }
+  }
+
+  // -------------------------
+  // ACTIVE BRAKE
+  // -------------------------
+  Serial.println("TARGET REACHED - BRAKING");
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, HIGH);
+  delay(50);
+  motorStop();
+
+  Serial.println("RUN COMPLETE");
+
+  while (true) {
+    // halt program
+  }
+}
