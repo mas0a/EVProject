@@ -1,0 +1,242 @@
+
+#include <Arduino.h>
+#include <PID_v1.h>
+
+// ========================
+// CONFIGURATION
+// ========================
+const float TARGET_DISTANCE_M = 8.0;  // <-- Set your distance here
+
+// ========================
+// PIN DEFINITIONS
+// ========================
+const int ENA   = 11;
+const int IN1   = 10;
+const int IN2   = 9;
+
+
+const int ENC_A = 2;
+const int ENC_B = 3;
+
+// ========================
+// PHYSICAL PARAMETERS
+// ========================
+const float WHEEL_DIAMETER_M    = 0.073025;   // 2 7/8 inches
+const int   ENCODER_CPR         = 11;        // Counts per motor revolution
+const float GEAR_RATIO          = 20.0 / 16.0;
+const int   QUADRATURE_MULT     = 4;          // 4x decoding
+
+// ========================
+// PID TUNING
+// ========================
+//tweak porportional, then derivitave, then integral (you probably wont need to tweak integral)
+const double Kp = 0.15;
+const double Ki = 0.00;
+const double Kd = 0.00;
+
+// ========================
+// MOTOR LIMITS
+// ========================
+const int PWM_MAX    = 255;
+const int PWM_MIN    = 50;
+const unsigned long TIMEOUT_MS = 30000;
+
+// ========================
+// ENCODER (thread-safe)
+// ========================
+volatile long encoderCount = 0;
+
+void encoderISR_A() {
+    bool a = digitalRead(ENC_A);
+    bool b = digitalRead(ENC_B);
+    encoderCount += (a == b) ? 1 : -1;
+}
+
+void encoderISR_B() {
+    bool a = digitalRead(ENC_A);
+    bool b = digitalRead(ENC_B);
+    encoderCount += (a != b) ? 1 : -1;
+}
+
+long readEncoder() {
+    noInterrupts();
+    long val = encoderCount;
+    interrupts();
+    return val;
+}
+
+void resetEncoder() {
+    noInterrupts();
+    encoderCount = 0;
+    interrupts();
+}
+
+// ========================
+// MOTOR CONTROL
+// ========================
+void motorForward(int pwm) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    analogWrite(ENA, pwm);
+}
+
+void motorStop() {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    analogWrite(ENA, 0);
+}
+
+void motorBrake() {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, 255);
+}
+
+// ========================
+// GLOBALS
+// ========================
+float metersPerTick;
+long targetTicks;
+
+double pidInput    = 0;
+double pidOutput   = 0;
+double pidSetpoint = 0;
+
+PID myPID(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, DIRECT);
+
+// ========================
+// SETUP
+// ========================
+void setup() {
+    // Motor pins
+    pinMode(ENA, OUTPUT);
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+    
+    // Encoder pins
+    pinMode(ENC_A, INPUT_PULLUP);
+    pinMode(ENC_B, INPUT_PULLUP);
+    
+    // Attach both interrupts for 4x resolution
+    attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR_A, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ENC_B), encoderISR_B, CHANGE);
+    
+    // Calculate meters per tick
+    float wheelCircumference = PI * WHEEL_DIAMETER_M;
+    float ticksPerWheelRev = ENCODER_CPR * GEAR_RATIO * QUADRATURE_MULT;
+    metersPerTick = wheelCircumference / ticksPerWheelRev;
+    
+    // Calculate target
+    targetTicks = (long)(TARGET_DISTANCE_M / metersPerTick);
+    pidSetpoint = targetTicks;
+    
+    // Configure PID
+    myPID.SetMode(AUTOMATIC);
+    myPID.SetOutputLimits(0, PWM_MAX);
+    myPID.SetSampleTime(10);  // 100 Hz
+    
+    // Serial
+    Serial.begin(115200);
+    Serial.println(F("\n=== DISTANCE ROBOT ==="));
+    Serial.print(F("Target: "));
+    Serial.print(TARGET_DISTANCE_M, 2);
+    Serial.print(F(" m ("));
+    Serial.print(targetTicks);
+    Serial.println(F(" ticks)"));
+    Serial.print(F("Resolution: "));
+    Serial.print(metersPerTick * 1000, 4);
+    Serial.println(F(" mm/tick"));
+    Serial.println();
+    
+    delay(1000);  // Brief pause before starting
+}
+
+// ========================
+// MAIN LOOP
+// ========================
+// ========================
+// CONTROL CONSTANTS
+// ========================
+const long  STOP_TOLERANCE_TICKS = 5;   // how close is "close enough"
+const int   SOFT_MIN_PWM         = 40;  // friction compensation
+const int   BRAKE_TIME_MS        = 40;
+
+void loop() {
+    static unsigned long startTime = millis();
+    static unsigned long lastPrint = 0;
+    static bool running = true;
+
+    if (!running) {
+        delay(100);
+        return;
+    }
+
+    unsigned long now = millis();
+
+    // Timeout safety
+    if (now - startTime > TIMEOUT_MS) {
+        motorStop();
+        myPID.SetMode(MANUAL);
+        Serial.println(F("ERROR: Timeout"));
+        running = false;
+        return;
+    }
+
+    // Read encoder (signed)
+    long ticks = readEncoder();
+    long error = targetTicks - ticks;
+
+    // PID input
+    pidInput = ticks;
+    myPID.Compute();
+
+    int pwm = (int)pidOutput;
+
+    // Friction compensation
+    if (abs(error) > STOP_TOLERANCE_TICKS && pwm > 0 && pwm < SOFT_MIN_PWM) {
+        pwm = SOFT_MIN_PWM;
+    }
+
+    // Drive logic
+    if (abs(error) > STOP_TOLERANCE_TICKS) {
+        motorForward(pwm);
+    } else {
+        // Target reached cleanly
+        motorBrake();
+        delay(BRAKE_TIME_MS);
+        motorStop();
+
+        myPID.SetMode(MANUAL);
+        pidOutput = 0;
+
+        float actualDistance = ticks * metersPerTick;
+
+        Serial.println();
+        Serial.println(F("=== TARGET REACHED ==="));
+        Serial.print(F("Target: "));
+        Serial.print(TARGET_DISTANCE_M, 3);
+        Serial.println(F(" m"));
+        Serial.print(F("Actual: "));
+        Serial.print(actualDistance, 3);
+        Serial.println(F(" m"));
+        Serial.print(F("Error:  "));
+        Serial.print((actualDistance - TARGET_DISTANCE_M) * 100, 1);
+        Serial.println(F(" cm"));
+
+        running = false;
+        return;
+    }
+
+    // Debug output (100 ms)
+    if (now - lastPrint >= 100) {
+        Serial.print(F("Ticks: "));
+        Serial.print(ticks);
+        Serial.print(F(" | Error: "));
+        Serial.print(error);
+        Serial.print(F(" | PWM: "));
+        Serial.println(pwm);
+        lastPrint = now;
+    }
+
+    delay(10);
+}
