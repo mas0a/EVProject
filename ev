@@ -1,349 +1,262 @@
+/*
+SCIOLY ELECTRIC VEHICLE CONTROLLER - ADAPTED
+Based on Unphayzed Electric Champion Kit
+Adapted for L298N motor driver and JGB37-520 encoder
+Auto-start, no LCD or buttons
+*/
 
-        #include <Arduino.h>
-        #include <PID_v1.h>
+#include <Arduino.h>
+#include <math.h>
 
-        // ========================
-        // CONFIGURATION
-        // ========================
-        const float TARGET_DISTANCE_M = 3.0;  // <-- Set your distance here (meters)
-        const float TARGET_TIME_S = 5.0;      // <-- Set your target time here (seconds)
+// ========================
+// COMPETITION SETTINGS
+// ========================
+double TargetDistance = 10.000;   // meters
+double TargetTime = 20.00;        // seconds
 
-        // ========================
-        // PIN DEFINITIONS
-        // ========================
-        const int ENA   = 11;
-        const int IN1   = 10;
-        const int IN2   = 9;
+// ========================
+// MOTOR DRIVER PINS (L298N)
+// ========================
+#define ENA 11
+#define IN1 9
+#define IN2 10
+
+#define CW 1
+#define CCW 0
+
+// ========================
+// ENCODER PINS
+// ========================
+#define ENCA 2
+#define ENCB 3
+
+// ========================
+// PHYSICAL PARAMETERS
+// ========================
+double wheelDiameter = 7.3025;     // cm
+double motorPPR = 30;              // JGB37-520 motor shaft
+double gearRatio = 16.0 / 20.0;    // motor to wheel
+double pulsesPerRev = motorPPR / gearRatio;
+
+double wheelBaseCM = 61.75375;     // 2 ft + 5/16 in
+double maxSteerDeg = 12.5;
+
+// ========================
+// ENCODER VARIABLES
+// ========================
+volatile long counter = 0;
+
+// ========================
+// STATE VARIABLES
+// ========================
+bool SBpressed = false;
+bool moved = false;
+bool slowed = false;
+bool snail = false;
+bool reachedTargetDistance = false;
+
+// ========================
+// DISTANCE VARIABLES
+// ========================
+double TargetDistanceCM;
+double ArcLength;
+double slowDownDistance;
+
+double targetEncoderValue;
+double slowDownEncoderValue;
+double maxEncoderValue;
+
+double encoderChange;
+double finalDist;
+
+// ========================
+// TIMER VARIABLES
+// ========================
+long startTime;
+long currentTime;
+long endTime;
+
+double timeDiff;
+double milisTime;
+double runTime;
+
+// ========================
+// SETUP
+// ========================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(ENCA, INPUT_PULLUP);
+  pinMode(ENCB, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(ENCA), ai0, RISING);
+  attachInterrupt(digitalPinToInterrupt(ENCB), ai1, RISING);
+
+  TargetDistanceCM = TargetDistance * 100.0;
+
+  ArcLength = getArcLength(TargetDistanceCM);
+  slowDownDistance = ArcLength - 100.0;
+
+  targetEncoderValue = getEncoderValue(ArcLength, wheelDiameter);
+  slowDownEncoderValue = getEncoderValue(slowDownDistance, wheelDiameter);
+  maxEncoderValue = getEncoderValue(ArcLength * 2.0, wheelDiameter);
+
+  delay(3000);
+
+  counter = 0;
+  startTime = millis();
+  SBpressed = true;
+}
+
+// ========================
+// MAIN LOOP
+// ========================
 
 
-        const int ENC_A = 2;
-        const int ENC_B = 3;
+void loop() {
 
-      // ========================
-      // PHYSICAL PARAMETERS
-      // ========================
-      const float WHEEL_DIAMETER_M    = 0.073025;   // 2 7/8 inches
-      const int   ENCODER_CPR         = 30;        // JGB37-520 PPR (on motor shaft)
-      const float GEAR_RATIO          = 16.0 / 20.0;  // motor 16t / wheel 20t (wheel moves slower)
-      const int   QUADRATURE_MULT     = 1;          // 1x decoding (single A channel only)        // ========================
-        // PID TUNING
-        // ========================
-        //tweak porportional, then derivitave, then integral (you probably wont need to tweak integral)
-        const double Kp = 0.5;
-        const double Ki = 0.01;
-        const double Kd = 0.05;
+static unsigned long lastPrint = 0;
+if (millis() - lastPrint > 250) {
+  lastPrint = millis();
+  Serial.print("ENC = ");
+  Serial.println(counter);
+}
 
-        // ========================
-        // MOTOR LIMITS
-        // ========================
-        const int PWM_MAX    = 255;
-        const int PWM_MIN    = 200;  // Increased from 150 to overcome stall
-        const unsigned long TIMEOUT_MS = 20000;
+  if (SBpressed) {
+    motorForward(200);
+    moved = true;
+    SBpressed = false;
+  }
 
-        // ========================
-        // ENCODER (thread-safe)
-        // ========================
-        volatile long encoderCount = 0;
-        volatile unsigned long lastISRTime = 0;
-        const unsigned long ISR_DEBOUNCE_US = 2000;  // 2ms debounce
+  if (moved) {
+    if (counter >= slowDownEncoderValue && counter < maxEncoderValue) {
+      motorStop();
+      delay(500);
 
-      // Count only on A-channel rising edges (simplest, most reliable)
-      void encoderISR_A() {
-          unsigned long now = micros();
-          if (now - lastISRTime < ISR_DEBOUNCE_US) return;  // Debounce
-          lastISRTime = now;
-          encoderCount++;
-      }
+      currentTime = millis();
+      runTime = (currentTime - startTime) / 1000.0;
+      timeDiff = TargetTime - runTime;
 
-      // Keep ISR_B empty but still attached (for compatibility)
-      void encoderISR_B() {
-          // Do nothing - we only count A channel rising edges
-      }        long readEncoder() {
-            noInterrupts();
-            long val = encoderCount;
-            interrupts();
-            return val;
-        }
+      slowed = true;
+      moved = false;
+    }
+  }
 
-        void resetEncoder() {
-            noInterrupts();
-            encoderCount = 0;
-            interrupts();
-        }
+  if (slowed) {
+    encoderChange = 0;
 
-        // ========================
-        // MOTOR CONTROL
-        // ========================
-      void motorForward(int pwm) {
-          digitalWrite(IN1, HIGH);
-          digitalWrite(IN2, LOW);
-          analogWrite(ENA, pwm);
-      }        void motorStop() {
-            digitalWrite(IN1, LOW);
-            digitalWrite(IN2, LOW);
-            analogWrite(ENA, 0);
-        }
+    for (int i = 0; i < 5; i++) {
+      long startEnc = counter;
+      motorForward(150);
+      delay(200);
+      motorStop();
+      delay(200);
+      encoderChange += (counter - startEnc);
+    }
 
-        void motorBrake() {
-            digitalWrite(IN1, HIGH);
-            digitalWrite(IN2, HIGH);
-            analogWrite(ENA, 255);
-        }
+    encoderChange /= 5.0;
 
-        // ========================
-        // GLOBALS
-        // ========================
-        float metersPerTick;
-        long targetTicks;
+    currentTime = millis();
+    runTime = (currentTime - startTime) / 1000.0;
+    timeDiff = TargetTime - runTime;
 
-        double pidInput    = 0;
-        double pidOutput   = 0;
-        double pidSetpoint = 0;
+    snail = true;
+    slowed = false;
+  }
 
-        PID myPID(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, DIRECT);
+  if (snail) {
+    double remaining = targetEncoderValue - counter;
+    double pulses = remaining / encoderChange;
 
-        // ========================
-        // SETUP
-        // ========================
-        void setup() {
-            // Motor pins
-            pinMode(ENA, OUTPUT);
-            pinMode(IN1, OUTPUT);
-            pinMode(IN2, OUTPUT);
-            
-            // Encoder pins
-            pinMode(ENC_A, INPUT_PULLUP);
-            pinMode(ENC_B, INPUT_PULLUP);
-            
-            // Attach both interrupts for 4x resolution
-            attachInterrupt(digitalPinToInterrupt(ENC_A), encoderISR_A, RISING);
-            attachInterrupt(digitalPinToInterrupt(ENC_B), encoderISR_B, CHANGE);
-            
-            // Calculate meters per tick
-            float wheelCircumference = PI * WHEEL_DIAMETER_M;
-            float ticksPerWheelRev = ENCODER_CPR * GEAR_RATIO * QUADRATURE_MULT;
-            metersPerTick = wheelCircumference / ticksPerWheelRev;
-            
-            // Calculate target
-            targetTicks = (long)(TARGET_DISTANCE_M / metersPerTick);
-            pidSetpoint = targetTicks;
-            
-            // Configure PID
-            myPID.SetMode(AUTOMATIC);
-            myPID.SetOutputLimits(0, PWM_MAX);
-            myPID.SetSampleTime(10);  // 100 Hz
-            
-            // Serial
-            Serial.begin(115200);
-            Serial.println(F("\n=== DISTANCE ROBOT ==="));
-            Serial.print(F("Target: "));
-            Serial.print(TARGET_DISTANCE_M, 2);
-            Serial.print(F(" m ("));
-            Serial.print(targetTicks);
-            Serial.println(F(" ticks)"));
-            Serial.print(F("Resolution: "));
-            Serial.print(metersPerTick * 1000, 4);
-            Serial.println(F(" mm/tick"));
-            Serial.println();
-            
-            delay(1000);  // Brief pause before starting
-        }
+    double pulseTime = pulses * 0.2;
+    double nonPulseTime = timeDiff - pulseTime;
+    if (nonPulseTime < 0) nonPulseTime = 0;
 
-        // ========================
-        // MAIN LOOP
-        // ========================
-        // ========================
-        // CONTROL CONSTANTS
-        // ========================
-        const long  STOP_TOLERANCE_TICKS = 5;   // how close is "close enough"
-        const int   SOFT_MIN_PWM         = 200; // Increased friction compensation
-        const int   BRAKE_TIME_MS        = 40;
-        const float PULSE_ZONE_M         = 1.0; // Enter pulsing mode when 1m is LEFT (at 2m traveled)
-        const int   PULSE_DURATION_MS    = 200; // How long to drive (ms)
-        const int   PULSE_WAIT_MS        = 300; // How long to wait between pulses (ms)
-        const int   PULSE_HOLD_PWM       = 150; // Hold brake during wait to prevent backslip
+    double pulseDelay = 1000.0 * (nonPulseTime / (pulses - 1));
 
-        void loop() {
-            static unsigned long startTime = millis();
-            static unsigned long lastPrint = 0;
-            static bool running = true;
-            static bool inPulseMode = false;
-            static unsigned long pulseStartTime = 0;
-            static bool pulseDriving = false;
+    for (int i = 0; i < pulses; i++) {
+      motorForward(150);
+      delay(200);
+      motorStop();
+      delay(pulseDelay);
+    }
 
-            if (!running) {
-                delay(100);
-                return;
-            }
+    endTime = millis();
+    runTime = (endTime - startTime) / 1000.0;
 
-            unsigned long now = millis();
+    snail = false;
+    reachedTargetDistance = true;
+  }
 
-            // Timeout safety
-            if (now - startTime > TIMEOUT_MS) {
-                motorStop();
-                myPID.SetMode(MANUAL);
-                Serial.println(F("ERROR: Timeout"));
-                running = false;
-                return;
-            }
+  if (reachedTargetDistance) {
+    finalDist = TargetDistance * (counter / targetEncoderValue);
 
-            // Read encoder with sanity check (cap at 2x target to catch noise)
-            long ticks = readEncoder();  // Remove negation - encoder counts correctly
-            long maxTicks = (long)(TARGET_DISTANCE_M * 2.0 / metersPerTick);
-            if (ticks > maxTicks) {
-                ticks = maxTicks;  // Cap but don't reset
-            }
-            long error = targetTicks - ticks;
-            float currentDistance = ticks * metersPerTick;
-            float distanceToTarget = TARGET_DISTANCE_M - currentDistance;
-            float elapsedTime = (now - startTime) / 1000.0;  // Convert to seconds
-            
-            // Debug: print raw encoder count every 1 second
-            static unsigned long lastEncoderDebug = 0;
-            if (now - lastEncoderDebug >= 1000) {
-                Serial.print(F("DEBUG: Raw encoder count = "));
-                Serial.println(readEncoder());
-                lastEncoderDebug = now;
-            }
+    while (true) {
+      delay(100);
+    }
+  }
+}
 
-            // PULSE MODE: Enter when 1m is LEFT to target (vehicle traveled 2m)
-            // COMMENTED OUT - running pure PID for full distance
-            /*
-            if (!inPulseMode && distanceToTarget <= PULSE_ZONE_M && currentDistance >= (TARGET_DISTANCE_M - PULSE_ZONE_M)) {
-                inPulseMode = true;
-                pulseStartTime = now;
-                pulseDriving = true;
-                Serial.println(F("\n>>> ENTERING PULSE MODE <<<"));
-            }
-            */
+// ========================
+// MOTOR FUNCTIONS
+// ========================
+void motorForward(int pwm) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, pwm);
+}
 
-            // Handle pulse mode
-            if (inPulseMode) {
-                unsigned long pulseElapsed = now - pulseStartTime;
-                
-                if (pulseDriving) {
-                    // Drive for PULSE_DURATION_MS
-                    if (pulseElapsed < PULSE_DURATION_MS) {
-                        motorForward(PWM_MIN + 20);
-                    } else {
-                        motorStop();
-                        pulseDriving = false;
-                        pulseStartTime = now;
-                    }
-                } else {
-                    // Wait between pulses - use holding brake to prevent backslip
-                    motorBrake();  // Hold position during wait
-                    
-                    if (pulseElapsed >= PULSE_WAIT_MS) {
-                        if (abs(error) <= STOP_TOLERANCE_TICKS) {
-                            // Reached target
-                            motorStop();
-                            myPID.SetMode(MANUAL);
-                            pidOutput = 0;
-                            inPulseMode = false;
+void motorStop() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+}
 
-                            Serial.println();
-                            Serial.println(F("=== TARGET REACHED (PULSE MODE) ==="));
-                            Serial.print(F("Target Dist: "));
-                            Serial.print(TARGET_DISTANCE_M, 3);
-                            Serial.println(F(" m"));
-                            Serial.print(F("Actual Dist: "));
-                            Serial.print(currentDistance, 3);
-                            Serial.println(F(" m"));
-                            Serial.print(F("Distance Error:  "));
-                            Serial.print((currentDistance - TARGET_DISTANCE_M) * 100, 1);
-                            Serial.println(F(" cm"));
-                            Serial.print(F("Actual Time:   "));
-                            Serial.print(elapsedTime, 4);
-                            Serial.println(F(" s"));
-                            Serial.print(F("Target Time: "));
-                            Serial.print(TARGET_TIME_S, 4);
-                            Serial.println(F(" s"));
-                            Serial.print(F("Time Error: "));
-                            Serial.print(elapsedTime - TARGET_TIME_S, 4);
-                            Serial.println(F(" s"));
+// ========================
+// ENCODER ISRs
+// ========================
+void ai0() {
+  if (digitalRead(ENCB) == LOW) counter++;
+  else counter--;
+}
 
-                            running = false;
-                            return;
-                        } else {
-                            pulseDriving = true;
-                            pulseStartTime = now;
-                        }
-                    }
-                }
+void ai1() {
+  if (digitalRead(ENCA) == LOW) counter--;
+  else counter++;
+}
 
-                // Debug output in pulse mode
-                if (now - lastPrint >= 100) {
-                    Serial.print(F("T: "));
-                    Serial.print(elapsedTime, 4);
-                    Serial.print(F("s | Dist: "));
-                    Serial.print(currentDistance, 4);
-                    Serial.print(F("m | PWM: "));
-                    Serial.print(PWM_MIN + 20);
-                    Serial.print(F(" | State: "));
-                    Serial.println(pulseDriving ? F("DRIVE") : F("WAIT"));
-                    lastPrint = now;
-                }
-            } else {
-                // NORMAL PID MODE
-                pidInput = ticks;
-                myPID.Compute();
+// ========================
+// CALCULATIONS
+// ========================
+double getEncoderValue(double distCM, double wheelDiaCM) {
+  double wheelCirc = 3.14159 * wheelDiaCM;
+  double effectivePPR = motorPPR / gearRatio;
+  return (distCM / wheelCirc) * effectivePPR;
+}
 
-                int pwm = (int)pidOutput;
-                
-                // Force minimum power to overcome friction
-                if (abs(error) > STOP_TOLERANCE_TICKS) {
-                    pwm = max(pwm, SOFT_MIN_PWM);
-                }
+double getArcLength(double chordCM) {
+  /*
+  Solves steering angle automatically from geometry
+  Enforces mechanical steering limit
+  */
 
-                // Drive logic
-                if (abs(error) > STOP_TOLERANCE_TICKS) {
-                    motorForward(pwm);
-                } else {
-                    // Target reached cleanly
-                    motorBrake();
-                    delay(BRAKE_TIME_MS);
-                    motorStop();
+  double phi = chordCM / wheelBaseCM;
+  double R = chordCM / (2.0 * sin(phi / 2.0));
+  double steerRad = atan(wheelBaseCM / R);
+  double steerDeg = steerRad * (180.0 / 3.14159);
 
-                    myPID.SetMode(MANUAL);
-                    pidOutput = 0;
+  Serial.print("Computed steering angle: ");
+  Serial.print(steerDeg, 2);
+  Serial.println(" deg");
 
-                    Serial.println();
-                    Serial.println(F("=== TARGET REACHED ==="));
-                    Serial.print(F("Target Dist: "));
-                    Serial.print(TARGET_DISTANCE_M, 3);
-                    Serial.println(F(" m"));
-                    Serial.print(F("Actual Dist: "));
-                    Serial.print(currentDistance, 3);
-                    Serial.println(F(" m"));
-                    Serial.print(F("Distance Error:  "));
-                    Serial.print((currentDistance - TARGET_DISTANCE_M) * 100, 1);
-                    Serial.println(F(" cm"));
-                    Serial.print(F("Actual Time:   "));
-                    Serial.print(elapsedTime, 4);
-                    Serial.println(F(" s"));
-                    Serial.print(F("Target Time: "));
-                    Serial.print(TARGET_TIME_S, 4);
-                    Serial.println(F(" s"));
-                    Serial.print(F("Time Error: "));
-                    Serial.print(elapsedTime - TARGET_TIME_S, 4);
-                    Serial.println(F(" s"));
+  if (abs(steerDeg) > maxSteerDeg) {
+    Serial.println("ERROR: Steering exceeds mechanical limit");
+    while (true) { delay(100); }
+  }
 
-                    running = false;
-                    return;
-                }
-
-                // Debug output (100 ms)
-                if (now - lastPrint >= 100) {
-                    Serial.print(F("T: "));
-                    Serial.print(elapsedTime, 4);
-                    Serial.print(F("s | Dist: "));
-                    Serial.print(currentDistance, 4);
-                    Serial.print(F("m | PWM: "));
-                    Serial.println(pwm);
-                    lastPrint = now;
-                }
-            }
-
-            delay(10);
-        }
+  return R * phi;
+}
