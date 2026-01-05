@@ -1,6 +1,6 @@
 SCIOLY EV 26
 
-[ONSHAPE LINK]([url](https://cad.onshape.com/documents/4d9acc5f844046ce6faa67b3/w/94d23bddc453a7f2479ab29d/e/2c9ee1e3d62298bae5cf0b25))
+[ONSHAPE LINK]([https://cad.onshape.com/documents/4d9acc5f844046ce6faa67b3/w/94d23bddc453a7f2479ab29d/e/2c9ee1e3d62298bae5cf0b25])
 
 ![unnamed](https://github.com/user-attachments/assets/98b6a300-e596-4446-94e8-86dcd1c24ef3)
 
