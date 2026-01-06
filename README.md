@@ -8,6 +8,11 @@ The idea of building the contraption started while watching youtube and stumblin
 
 ![unnamed](https://github.com/user-attachments/assets/8045c88b-fc4b-4264-ade2-a38bcde1b4a0)
 
+WIRING DIAGRAM
+
+<img width="1009" height="754" alt="image" src="https://github.com/user-attachments/assets/2ec71202-5ee3-41a4-81d9-ef2a1c99e7b6" />
+
+
 | Item                                                    | Quantity | Price | Shipping | Link                                                                                                                                                                           |
 | ------------------------------------------------------- | -------- | ----- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Carbon Fiber TUBE 7mm x 6mm x 1000mm                    | 5        | 17.58 | 8.74     | [https://windcatcherrc.com/product/carbon-fiber-tube-7mm-x-6mm-x-1000mm/](https://windcatcherrc.com/product/carbon-fiber-tube-7mm-x-6mm-x-1000mm/)                             |
