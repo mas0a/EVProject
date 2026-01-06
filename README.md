@@ -6,5 +6,5 @@ The idea of building the contraption started while watching youtube and stumblin
 
 <img width="717" height="491" alt="image" src="https://github.com/user-attachments/assets/84e45fde-fdce-4e9d-9168-2bec62b5a7b8" />
 
-
+![unnamed](https://github.com/user-attachments/assets/8045c88b-fc4b-4264-ade2-a38bcde1b4a0)
 
