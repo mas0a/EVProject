@@ -1,8 +1,154 @@
-Precision Electric Vehicle
+Project Overview
 
-This project aims to move precise set distances accurately and with haste.
+The Precision Electric Vehicle is a small, self contained robotic vehicle designed to travel a precise, user defined distance as accurately and quickly as possible. The project is inspired by the Science Olympiad Electric Vehicle event, where consistency, repeatability, and mechanical reliability matter more than raw speed.
 
-The idea of building the contraption started while watching youtube and stumbling across the SCIOLY EV event.  I also want to build experience in CAD, hands-on assembly and C++ programming.
+This project combines mechanical design, electronics, and embedded software into a single system. The goal is not only to build a competitive vehicle, but also to gain hands on experience in CAD design, mechanical assembly, wiring, and C++ programming for microcontrollers.
+
+Why I Built This Project
+
+I first became interested in this type of system after watching videos of Science Olympiad Electric Vehicle builds and competitions. What stood out to me was how small mechanical details and software decisions could significantly impact accuracy over long distances.
+
+I chose this project because it forces me to develop skills in multiple areas at once:
+
+CAD modeling of a lightweight but rigid chassis
+
+Mechanical power transmission using belts and pulleys
+
+Precision sensing with rotary encoders
+
+Motor control and feedback based distance tracking
+
+Writing and debugging C++ code on an Arduino
+
+This project is meant to be educational first, while still being functional and competition ready.
+
+System Design
+Mechanical Design
+
+The chassis is built primarily from carbon fiber tubes and rods to maximize stiffness while keeping mass low. The frame uses 7 mm carbon fiber tubes as the main structural members, with 4 mm carbon fiber rods acting as bracing and cross supports.
+
+Four BaneBots T6 wheels are mounted using T61 hubs. The hubs clamp onto 4 mm shafts, which are supported by the frame. Power from the motor is transmitted using a GT2 timing belt system rather than direct drive. This reduces slippage and allows for precise control over wheel rotation.
+
+A belt driven system was chosen instead of gears because:
+
+GT2 belts have minimal backlash
+
+Belt tension can be adjusted easily
+
+The system is quieter and more forgiving during testing
+
+Drive System
+
+The vehicle is driven by a JGB37 520 DC gear motor. This motor was selected because it provides a good balance of torque and speed, making it suitable for controlled acceleration and deceleration.
+
+A rotary encoder is mechanically coupled to the drive system. The encoder outputs 600 pulses per revolution, allowing the software to calculate distance traveled with high resolution.
+
+Electronics and Wiring
+
+The wiring is intentionally simple to reduce points of failure. The core components are:
+
+Arduino microcontroller
+
+DC motor driver
+
+Rotary encoder
+
+Power source
+
+The encoder provides quadrature signals to the Arduino, which counts pulses and determines direction of rotation. The motor driver receives PWM signals from the Arduino to control speed and direction.
+
+A wiring diagram is included in the repository to show all electrical connections clearly.
+
+Software and Control Logic
+
+The software is written in C++ using the Arduino framework. The control strategy is based on distance feedback rather than time alone.
+
+Key features of the code include:
+
+Encoder based distance calculation
+
+Configurable target distance
+
+Controlled acceleration at startup
+
+Gradual deceleration as the vehicle approaches the target distance
+
+Automatic motor cutoff once the target distance is reached
+
+Distance is calculated by converting encoder pulses into wheel rotations and then into linear distance using the known wheel circumference. This approach allows for consistent results even if battery voltage changes.
+
+Current Build Status
+Completed
+
+Initial CAD design of the chassis
+
+Selection of all mechanical and electrical components
+
+Basic frame assembly using carbon fiber tubes and rods
+
+Wheel and hub mounting
+
+Encoder mounting and alignment
+
+Initial motor control and encoder reading code
+
+In Progress
+
+Final chassis reinforcement
+
+Fine tuning belt tension and alignment
+
+Improving software acceleration and deceleration curves
+
+Repeatability testing over multiple runs
+
+Not Yet Built
+
+Final enclosure for electronics
+
+Long term durability testing
+
+Competition level tuning and calibration
+
+Bill of Materials and Cost Clarification
+
+The table below lists all required parts. The "Total Price" column represents the full cost for that line item as listed by the vendor. Quantity is included for clarity but does not multiply the listed price. Shipping is added once per item when applicable.
+
+The BOM total including shipping is 197.21 USD. This value now matches the spreadsheet calculation.
+
+Some parts have already been purchased using personal funds. The remaining items are what the grant is intended to cover.
+
+Grant Request Explanation
+
+The grant is requested to cover:
+
+Carbon fiber structural materials
+
+Wheels and hubs
+
+Encoder and motor components
+
+Hardware assortments required for final assembly
+
+These items represent the largest cost barriers to completing and refining the project. Funding these components will allow the project to be fully assembled, tested, and iterated upon without compromising design quality.
+
+The grant total has been updated to match the corrected BOM total to avoid any discrepancies.
+
+Documentation and Screenshots
+
+Additional cart screenshots will be added to show:
+
+Individual vendor carts
+
+Price breakdowns
+
+Shipping costs
+
+This will provide full transparency and make it easier to verify costs.
+
+Conclusion
+
+This project is an ongoing learning experience focused on precision engineering, control systems, and iterative design. With the remaining parts funded, the vehicle can be fully completed, tested, and refined into a reliable precision platform suitable for competition and further experimentation.
 
 <img width="717" height="491" alt="image" src="https://github.com/user-attachments/assets/84e45fde-fdce-4e9d-9168-2bec62b5a7b8" />
 
