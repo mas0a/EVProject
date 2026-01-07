@@ -13,7 +13,7 @@ WIRING DIAGRAM
 <img width="1009" height="754" alt="image" src="https://github.com/user-attachments/assets/2ec71202-5ee3-41a4-81d9-ef2a1c99e7b6" />
 
 
-| Item                                                    | Quantity | Unit Price | Shipping | Link                                                                                                                                                                           |
+| Item                                                    | Quantity | Total Price | Shipping | Link                                                                                                                                                                           |
 | ------------------------------------------------------- | -------- | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Carbon Fiber Tube 7mm x 6mm x 1000mm                    | 5        | 17.58      | 8.74     | [https://windcatcherrc.com/product/carbon-fiber-tube-7mm-x-6mm-x-1000mm/](https://windcatcherrc.com/product/carbon-fiber-tube-7mm-x-6mm-x-1000mm/)                             |
 | Carbon Fiber Rod 4mm x 1000mm                           | 2        | 8.68       | —        | [https://windcatcherrc.com/product-category/carbon_fiber/carbon-fiber-rod/](https://windcatcherrc.com/product-category/carbon_fiber/carbon-fiber-rod/)                         |
