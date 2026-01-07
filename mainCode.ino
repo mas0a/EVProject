@@ -11,7 +11,7 @@ Auto-start, no LCD or buttons
 // ========================
 // COMPETITION SETTINGS
 // ========================
-double TargetDistance = 10.000;   // meters
+double TargetDistance = 2.000;   // meters
 double TargetTime = 20.00;        // seconds
 
 // ========================
@@ -20,9 +20,6 @@ double TargetTime = 20.00;        // seconds
 #define ENA 11
 #define IN1 9
 #define IN2 10
-
-#define CW 1
-#define CCW 0
 
 // ========================
 // ENCODER PINS
@@ -33,13 +30,11 @@ double TargetTime = 20.00;        // seconds
 // ========================
 // PHYSICAL PARAMETERS
 // ========================
-double wheelDiameter = 7.3025;     // cm
-double motorPPR = 30;              // JGB37-520 motor shaft
-double gearRatio = 16.0 / 20.0;    // motor to wheel
-double pulsesPerRev = motorPPR / gearRatio;
-
-double wheelBaseCM = 61.75375;     // 2 ft + 5/16 in
-double maxSteerDeg = 12.5;
+const double wheelDiameter = 7.3025;     // cm
+const double motorPPR = 44;              // JGB37-520 motor shaft
+const double gearRatio = 16.0 / 20.0;    // motor to wheel
+const double pulsesPerRev = motorPPR / gearRatio;
+const double wheelBaseCM = 61.75375;     // 2 ft + 5/16 in
 
 // ========================
 // ENCODER VARIABLES
@@ -86,10 +81,12 @@ double runTime;
 void setup() {
   Serial.begin(115200);
 
+  // motor pins
   pinMode(ENA, OUTPUT);
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
 
+  // encoder pins
   pinMode(ENCA, INPUT_PULLUP);
   pinMode(ENCB, INPUT_PULLUP);
 
@@ -97,13 +94,12 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCB), ai1, RISING);
 
   TargetDistanceCM = TargetDistance * 100.0;
+  ArcLength = TargetDistanceCM;  // Set to straight-line distance
+  slowDownDistance = TargetDistanceCM * 0.8;  // Slow down at 80% of target distance
 
-  ArcLength = getArcLength(TargetDistanceCM);
-  slowDownDistance = ArcLength - 100.0;
-
-  targetEncoderValue = getEncoderValue(ArcLength, wheelDiameter);
+  targetEncoderValue = getEncoderValue(TargetDistanceCM, wheelDiameter);
   slowDownEncoderValue = getEncoderValue(slowDownDistance, wheelDiameter);
-  maxEncoderValue = getEncoderValue(ArcLength * 2.0, wheelDiameter);
+  maxEncoderValue = getEncoderValue(TargetDistanceCM * 2.0, wheelDiameter);
 
   delay(3000);
 
@@ -120,6 +116,7 @@ void setup() {
 void loop() {
 
 static unsigned long lastPrint = 0;
+
 if (millis() - lastPrint > 250) {
   lastPrint = millis();
   Serial.print("ENC = ");
@@ -205,8 +202,8 @@ if (millis() - lastPrint > 250) {
 // MOTOR FUNCTIONS
 // ========================
 void motorForward(int pwm) {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
   analogWrite(ENA, pwm);
 }
 
@@ -233,30 +230,7 @@ void ai1() {
 // CALCULATIONS
 // ========================
 double getEncoderValue(double distCM, double wheelDiaCM) {
-  double wheelCirc = 3.14159 * wheelDiaCM;
+  double wheelCirc = PI * wheelDiaCM;
   double effectivePPR = motorPPR / gearRatio;
   return (distCM / wheelCirc) * effectivePPR;
-}
-
-double getArcLength(double chordCM) {
-  /*
-  Solves steering angle automatically from geometry
-  Enforces mechanical steering limit
-  */
-
-  double phi = chordCM / wheelBaseCM;
-  double R = chordCM / (2.0 * sin(phi / 2.0));
-  double steerRad = atan(wheelBaseCM / R);
-  double steerDeg = steerRad * (180.0 / 3.14159);
-
-  Serial.print("Computed steering angle: ");
-  Serial.print(steerDeg, 2);
-  Serial.println(" deg");
-
-  if (abs(steerDeg) > maxSteerDeg) {
-    Serial.println("ERROR: Steering exceeds mechanical limit");
-    while (true) { delay(100); }
-  }
-
-  return R * phi;
 }
