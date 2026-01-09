@@ -10,11 +10,11 @@ Encoder: motor shaft
 // ========================
 // USER SETTINGS
 // ========================
-double TargetDistance = 5.000;   // meters (what you WANT physically)
+double TargetDistance = 7.000;   // meters (what you WANT physically)
 double decelDistance  = 1.000;   // meters before stop
 
 // HARD COAST COMPENSATION
-const double coastSubtract = 0.6858;   // 27 inches in meters
+const double coastSubtract = 0.8;   // 27 inches in meters
 
 int maxPWM = 255;
 int minPWM = 180;
