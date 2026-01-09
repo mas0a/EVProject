@@ -1,0 +1,171 @@
+/*
+SCIOLY ELECTRIC VEHICLE CONTROLLER - DISTANCE + DECEL
+Motor: JGB37-520
+Driver: L298N
+Encoder: motor shaft
+*/
+
+#include <Arduino.h>
+
+// ========================
+// USER SETTINGS
+// ========================
+double TargetDistance = 5.000;   // meters (what you WANT physically)
+double decelDistance  = 1.000;   // meters before stop
+
+// HARD COAST COMPENSATION
+const double coastSubtract = 0.6858;   // 27 inches in meters
+
+int maxPWM = 255;
+int minPWM = 180;
+
+// ========================
+// MOTOR DRIVER PINS
+// ========================
+#define ENA 11
+#define IN1 9
+#define IN2 10
+
+// ========================
+// ENCODER PINS
+// ========================
+#define ENCA 2
+#define ENCB 3
+
+// ========================
+// PHYSICAL PARAMETERS
+// ========================
+double wheelDiameter = 7.3025;   // cm
+double motorPPR = 70.0;
+double gearRatio = 20.0 / 16.0;
+
+// ========================
+// ENCODER VARIABLES
+// ========================
+volatile long encoderCount = 0;
+long stopEncoderCount = 0;
+long decelStartCount = 0;
+
+// ========================
+// SETUP
+// ========================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(ENCA, INPUT_PULLUP);
+  pinMode(ENCB, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(ENCA), encoderISR, RISING);
+
+  double commandedDistance = TargetDistance - coastSubtract;
+  if (commandedDistance < 0) commandedDistance = 0;
+
+  stopEncoderCount = distanceToCounts(commandedDistance);
+  decelStartCount  = stopEncoderCount - distanceToCounts(decelDistance);
+
+  Serial.println("=== EV DISTANCE CONTROLLER (FULL SPEED UNTIL DECEL) ===");
+  Serial.print("Requested distance (m): ");
+  Serial.println(TargetDistance);
+  Serial.print("Commanded distance (m): ");
+  Serial.println(commandedDistance);
+  Serial.print("Decel start count: ");
+  Serial.println(decelStartCount);
+  Serial.print("Stop encoder count: ");
+  Serial.println(stopEncoderCount);
+  Serial.println("Starting in 3 seconds");
+  Serial.println();
+
+  delay(3000);
+  encoderCount = 0;
+}
+
+// ========================
+// MAIN LOOP
+// ========================
+void loop() {
+  static unsigned long lastPrint = 0;
+  int pwmOutput;
+
+  // -------- SPEED CONTROL --------
+  if (encoderCount < decelStartCount) {
+    // FULL SPEED, NO MODULATION
+    pwmOutput = maxPWM;
+  } else {
+    // DECEL ZONE
+    double remaining = stopEncoderCount - encoderCount;
+    double decelCounts = stopEncoderCount - decelStartCount;
+
+    double ratio = remaining / decelCounts;
+    ratio = constrain(ratio, 0.0, 1.0);
+
+    pwmOutput = minPWM + ratio * (maxPWM - minPWM);
+  }
+
+  motorForward(pwmOutput);
+
+  // -------- SERIAL OUTPUT --------
+  if (millis() - lastPrint >= 200) {
+    lastPrint = millis();
+
+    Serial.print("ENC: ");
+    Serial.print(encoderCount);
+    Serial.print(" | PWM: ");
+    Serial.print(pwmOutput);
+    Serial.print(" | Dist (m): ");
+    Serial.println(countsToDistance(encoderCount), 4);
+  }
+
+  // -------- STOP CONDITION --------
+  if (encoderCount >= stopEncoderCount) {
+    motorStop();
+    Serial.println("Motor cut (27 in offset applied)");
+    while (true) {
+      delay(100);
+    }
+  }
+}
+
+// ========================
+// MOTOR CONTROL
+// ========================
+void motorForward(int pwm) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, pwm);
+}
+
+void motorStop() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+}
+
+// ========================
+// ENCODER ISR
+// ========================
+void encoderISR() {
+  if (digitalRead(ENCB) == LOW) encoderCount++;
+  else encoderCount--;
+}
+
+// ========================
+// DISTANCE CALCULATIONS
+// ========================
+long distanceToCounts(double meters) {
+  double cm = meters * 100.0;
+  double wheelCirc = PI * wheelDiameter;
+  double wheelRevs = cm / wheelCirc;
+  double effectivePPR = motorPPR * gearRatio;
+  return wheelRevs * effectivePPR;
+}
+
+double countsToDistance(long counts) {
+  double wheelCirc = PI * wheelDiameter;
+  double effectivePPR = motorPPR * gearRatio;
+  double wheelRevs = counts / effectivePPR;
+  return (wheelRevs * wheelCirc) / 100.0;
+}
