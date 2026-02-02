@@ -8,7 +8,7 @@ double accelDistance  = 1.00;    // meters to ramp up
 double decelDistance  = 3.50;    // meters to ramp down
 
 // HARD COAST COMPENSATION
-const double coastSubtract = 0.27;
+const double coastSubtract = 0.41;
 
 // PWM LIMITS
 int maxPWM = 200;    // Cruise speed
