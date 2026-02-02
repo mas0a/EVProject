@@ -9,7 +9,7 @@ double TargetDistance = 9.5;   // meters target dist.
 double decelDistance  = 1.00;   // meters to slowdown
 
 // HARD COAST COMPENSATION
-const double coastSubtract = .975;
+const double coastSubtract = 1;
 
 int maxPWM = 220;
 int minPWM = 150;
