@@ -3,7 +3,7 @@
 // ========================
 // USER SETTINGS
 // ========================
-double TargetDistance = 9;     // meters target dist.
+double TargetDistance = 9.00;     // meters target dist.
 double accelDistance  = 1.00;    // meters to ramp up
 double decelDistance  = 3.50;    // meters to ramp down
 
@@ -12,7 +12,7 @@ const double coastSubtract = 0.7;
 
 // PWM LIMITS
 int maxPWM = 200;    // Cruise speed
-int startPWM = 150;  // Initial acceleration PWM (can be lower for gentle start)
+int startPWM =125;  // Initial acceleration PWM (can be lower for gentle start)
 int endPWM = 90;    // Final deceleration PWM (can be lower than startPWM)
 
 // ========================
