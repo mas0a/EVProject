@@ -3,12 +3,12 @@
 // ========================
 // USER SETTINGS
 // ========================
-double TargetDistance = 9.5;     // meters target dist.
+double TargetDistance = 9;     // meters target dist.
 double accelDistance  = 1.00;    // meters to ramp up
 double decelDistance  = 3.50;    // meters to ramp down
 
 // HARD COAST COMPENSATION
-const double coastSubtract = 0.41;
+const double coastSubtract = 0.7;
 
 // PWM LIMITS
 int maxPWM = 200;    // Cruise speed
