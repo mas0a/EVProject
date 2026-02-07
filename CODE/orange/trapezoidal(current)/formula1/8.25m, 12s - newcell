@@ -1,0 +1,285 @@
+#include <Arduino.h>
+
+// ========================
+// USER SETTINGS
+// ========================
+double TargetDistance = 8.25;     // meters target dist.
+double accelDistance  = 1.00;    // meters to ramp up
+double decelDistance  = 3.50;    // meters to ramp down
+
+// HARD COAST COMPENSATION
+const double coastSubtract = 1.22;
+
+// PWM LIMITS
+int maxPWM = 150;    // Cruise speed
+int startPWM =100;  // Initial acceleration PWM (can be lower for gentle start)
+int endPWM = 90;    // Final deceleration PWM (can be lower than startPWM)
+
+// ========================
+// MOTOR DRIVER PINS
+// ========================
+#define ENA 11
+#define IN1 9
+#define IN2 10
+
+// ========================
+// ENCODER PINS
+// ========================
+#define ENCA 2
+#define ENCB 3
+
+// ========================
+// PHYSICAL PARAMETERS
+// ========================
+double wheelDiameter = 6.0325;   // cm
+double motorPPR = 70.0;
+double gearRatio = 20.0 / 16.0;
+
+// ========================
+// ENCODER VARIABLES
+// ========================
+volatile long encoderCount = 0;
+long stopEncoderCount = 0;
+long accelEndCount = 0;
+long decelStartCount = 0;
+
+// ========================
+// TIMEOUT SETTINGS
+// ========================
+const unsigned long TIMEOUT_MS = 20000;  // 20 second timeout
+unsigned long motionStartTime = 0;
+
+// ========================
+// MOTION PROFILE PHASES
+// ========================
+enum MotionPhase {
+  ACCEL,
+  CRUISE,
+  DECEL,
+  STOPPED
+};
+
+MotionPhase currentPhase = ACCEL;
+
+// ========================
+// SETUP
+// ========================
+void setup() {
+  Serial.begin(115200);
+  
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENCA, INPUT_PULLUP);
+  pinMode(ENCB, INPUT_PULLUP);
+  
+  attachInterrupt(digitalPinToInterrupt(ENCA), encoderISR, RISING);
+  
+  // Calculate commanded distance with coast compensation
+  double commandedDistance = TargetDistance - coastSubtract;
+  if (commandedDistance < 0) commandedDistance = 0;
+  
+  // Calculate encoder count waypoints
+  stopEncoderCount = distanceToCounts(commandedDistance);
+  accelEndCount = distanceToCounts(accelDistance);
+  decelStartCount = stopEncoderCount - distanceToCounts(decelDistance);
+  
+  // Validate profile - ensure accel doesn't overlap decel
+  if (accelEndCount >= decelStartCount) {
+    Serial.println("WARNING: Accel+Decel distances exceed total distance!");
+    Serial.println("Adjusting to triangular profile...");
+    // Split distance 50/50 between accel and decel
+    accelEndCount = stopEncoderCount / 2;
+    decelStartCount = stopEncoderCount / 2;
+  }
+  
+  // Print configuration
+  Serial.println("=== TRAPEZOIDAL MOTION PROFILE CONTROLLER ===");
+  Serial.print("Target distance (m): ");
+  Serial.println(TargetDistance);
+  Serial.print("Commanded distance (m): ");
+  Serial.println(commandedDistance);
+  Serial.println();
+  Serial.println("--- Motion Profile Waypoints ---");
+  Serial.print("Accel end count: ");
+  Serial.print(accelEndCount);
+  Serial.print(" (");
+  Serial.print(countsToDistance(accelEndCount), 2);
+  Serial.println(" m)");
+  Serial.print("Cruise start count: ");
+  Serial.print(accelEndCount);
+  Serial.print(" | Cruise end count: ");
+  Serial.println(decelStartCount);
+  Serial.print("Decel start count: ");
+  Serial.print(decelStartCount);
+  Serial.print(" (");
+  Serial.print(countsToDistance(decelStartCount), 2);
+  Serial.println(" m)");
+  Serial.print("Stop count: ");
+  Serial.print(stopEncoderCount);
+  Serial.print(" (");
+  Serial.print(countsToDistance(stopEncoderCount), 2);
+  Serial.println(" m)");
+  Serial.println();
+  Serial.print("PWM Range: ");
+  Serial.print(startPWM);
+  Serial.print(" (start) -> ");
+  Serial.print(maxPWM);
+  Serial.print(" (cruise) -> ");
+  Serial.print(endPWM);
+  Serial.println(" (end)");
+  Serial.println();
+  Serial.println("Starting in 1 second...");
+  Serial.println();
+  
+  delay(1000);
+  encoderCount = 0;
+  motionStartTime = millis();  // Start timeout timer
+}
+
+// ========================
+// MAIN LOOP
+// ========================
+void loop() {
+  static unsigned long lastPrint = 0;
+  int pwmOutput;
+  
+  // -------- TRAPEZOIDAL PROFILE CONTROL --------
+  if (encoderCount < accelEndCount) {
+    // ACCELERATION PHASE
+    currentPhase = ACCEL;
+    double progress = (double)encoderCount / (double)accelEndCount;
+    progress = constrain(progress, 0.0, 1.0);
+    // Linear ramp from startPWM to maxPWM
+    pwmOutput = startPWM + progress * (maxPWM - startPWM);
+    
+  } else if (encoderCount < decelStartCount) {
+    // CRUISE PHASE (Constant velocity)
+    currentPhase = CRUISE;
+    pwmOutput = maxPWM;
+    
+  } else if (encoderCount < stopEncoderCount) {
+    // DECELERATION PHASE
+    currentPhase = DECEL;
+    double remaining = stopEncoderCount - encoderCount;
+    double decelCounts = stopEncoderCount - decelStartCount;
+    double ratio = remaining / decelCounts;
+    ratio = constrain(ratio, 0.0, 1.0);
+    // Linear ramp from maxPWM to endPWM
+    pwmOutput = endPWM + ratio * (maxPWM - endPWM);
+    
+  } else {
+    // STOPPED
+    currentPhase = STOPPED;
+    pwmOutput = 0;
+  }
+  
+  // Apply motor command
+  if (currentPhase != STOPPED) {
+    motorForward(pwmOutput);
+  } else {
+    motorStop();
+  }
+  
+  // -------- SERIAL OUTPUT --------
+  if (millis() - lastPrint >= 200) {
+    lastPrint = millis();
+    
+    Serial.print("Phase: ");
+    switch(currentPhase) {
+      case ACCEL:   Serial.print("ACCEL  "); break;
+      case CRUISE:  Serial.print("CRUISE "); break;
+      case DECEL:   Serial.print("DECEL  "); break;
+      case STOPPED: Serial.print("STOPPED"); break;
+    }
+    Serial.print(" | ENC: ");
+    Serial.print(encoderCount);
+    Serial.print(" | PWM: ");
+    Serial.print(pwmOutput);
+    Serial.print(" | Dist (m): ");
+    Serial.print(countsToDistance(encoderCount), 4);
+    Serial.print(" | Time: ");
+    Serial.print((millis() - motionStartTime) / 1000.0, 1);
+    Serial.println("s");
+  }
+  
+  // -------- TIMEOUT CHECK --------
+  if (millis() - motionStartTime >= TIMEOUT_MS) {
+    motorStop();
+    Serial.println();
+    Serial.println("=== TIMEOUT! ===");
+    Serial.print("Motion exceeded ");
+    Serial.print(TIMEOUT_MS / 1000);
+    Serial.println(" second timeout");
+    Serial.print("Distance traveled: ");
+    Serial.print(countsToDistance(encoderCount), 4);
+    Serial.println(" m");
+    Serial.print("Target distance: ");
+    Serial.print(TargetDistance, 4);
+    Serial.println(" m");
+    
+    while (true) {
+      delay(100);
+    }
+  }
+  
+  // -------- STOP CONDITION --------
+  if (currentPhase == STOPPED) {
+    Serial.println();
+    Serial.println("=== MOTION COMPLETE ===");
+    Serial.print("Final distance: ");
+    Serial.print(countsToDistance(encoderCount), 4);
+    Serial.println(" m");
+    Serial.print("Target distance: ");
+    Serial.print(TargetDistance, 4);
+    Serial.println(" m");
+    Serial.print("Error: ");
+    Serial.print((countsToDistance(encoderCount) - TargetDistance) * 100, 2);
+    Serial.println(" cm");
+    
+    while (true) {
+      delay(100);
+    }
+  }
+}
+
+// ========================
+// MOTOR CONTROL
+// ========================
+void motorForward(int pwm) {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, pwm);
+}
+
+void motorStop() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+}
+
+// ========================
+// ENCODER ISR
+// ========================
+void encoderISR() {
+  if (digitalRead(ENCB) == LOW) encoderCount++;
+  else encoderCount--;
+}
+
+// ========================
+// DISTANCE CALCULATIONS
+// ========================
+long distanceToCounts(double meters) {
+  double cm = meters * 100.0;
+  double wheelCirc = PI * wheelDiameter;
+  double wheelRevs = cm / wheelCirc;
+  double effectivePPR = motorPPR * gearRatio;
+  return (long)(wheelRevs * effectivePPR);
+}
+
+double countsToDistance(long counts) {
+  double wheelCirc = PI * wheelDiameter;
+  double effectivePPR = motorPPR * gearRatio;
+  double wheelRevs = (double)counts / effectivePPR;
+  return (wheelRevs * wheelCirc) / 100.0;
+}
